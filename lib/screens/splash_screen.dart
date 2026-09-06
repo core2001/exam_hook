@@ -94,7 +94,8 @@ class _SplashScreenState extends State<SplashScreen>
                       Icons.school_rounded,
                       size: 80,
                       color: Colors.white,
-                    ),
+                    ), 
+            
                   ),
                   const SizedBox(height: 24),
                   Text(

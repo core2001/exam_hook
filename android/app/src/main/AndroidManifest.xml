@@ -1,8 +1,23 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    
+    <uses-permission android:name="android.permission.READ_MEDIA_DOCUMENTS"/>
+    <!-- INTERNET: For Firebase, Supabase, downloading files -->
+  <uses-permission android:name="android.permission.INTERNET"/>
+ <!-- READ/WRITE: For file_picker to pick PDFs, DOCS from device -->
+  <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>
+<!-- QUERY ALL PACKAGES: Needed for url_launcher to open browser/pdf viewer -->
+   <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+    </queries>
+
     <application
-        android:label="exam_hook"
+        android:label="ExamHook"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/logo">
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -30,6 +45,17 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+           
+          <provider
+    android:name="androidx.core.content.FileProvider"
+    android:authorities="${applicationId}.fileprovider"
+    android:exported="false"
+    android:grantUriPermissions="true">
+    <meta-data
+        android:name="android.support.FILE_PROVIDER_PATHS"
+        android:resource="@xml/filepaths" />
+</provider>
+
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
