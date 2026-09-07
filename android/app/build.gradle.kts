@@ -1,12 +1,11 @@
 plugins {
     id("com.android.application")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
 android {
     namespace = "com.example.exam_hook"
-    compileSdk = 36  // CHANGED: was flutter.compileSdkVersion
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -17,7 +16,7 @@ android {
     defaultConfig {
         applicationId = "com.example.exam_hook"
         minSdk = flutter.minSdkVersion
-        targetSdk = 36  // CHANGED: was flutter.targetSdkVersion. Recommended for Play Store
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
