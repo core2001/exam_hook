@@ -1,7 +1,9 @@
 workflows:
   android-release:
     name: Android Release
+    max_build_duration: 60
     environment:
+      flutter: 3.47.2  # <--- This is the key
       vars:
         GOOGLE_SERVICES_JSON: $GOOGLE_SERVICES_JSON
     scripts:
@@ -9,9 +11,12 @@ workflows:
         script: |
           echo "$GOOGLE_SERVICES_JSON" | tr -d '\n' | base64 --decode > android/app/google-services.json
           ls -l android/app/google-services.json
+      - name: Flutter pub get
+        script: |
+          flutter --version
+          flutter pub get
       - name: Flutter build APK
         script: |
-          flutter pub get
           flutter build apk --release
     artifacts:
       - build/app/outputs/flutter-apk/*.apk
