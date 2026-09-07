@@ -15,6 +15,10 @@ workflows:
         script: |
           flutter --version
           flutter pub get
+      - name: Clean
+        script: |
+          flutter clean
+          flutter pub get
       - name: Flutter build APK
         script: |
           flutter build apk --release
