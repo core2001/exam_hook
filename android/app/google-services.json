@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "32937687187",
+    "project_id": "exam-44b",
+    "storage_bucket": "exam-44b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:32937687187:android:c439cd30ddbd1180d43566",
+        "android_client_info": {
+          "package_name": "com.corevanta.examhook"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCUHJ8v9uwnLt4YuGZBGME4opBuSLPnrXE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
