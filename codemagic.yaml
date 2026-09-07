@@ -2,10 +2,13 @@ workflows:
   android-release:
     name: Android Release
     environment:
-      android_signing:
-        - keystore_credentials
+      vars:
+        GOOGLE_SERVICES_JSON: $GOOGLE_SERVICES_JSON
     scripts:
-      - name: Flutter build
+      - name: Setup Google Services
+        script: |
+          echo $GOOGLE_SERVICES_JSON | base64 --decode > android/app/google-services.json
+      - name: Flutter build APK
         script: |
           flutter pub get
           flutter build apk --release
