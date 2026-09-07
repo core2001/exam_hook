@@ -3,9 +3,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:uuid/uuid.dart';
-import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart'; // CHANGED
 import 'dart:typed_data';
-import 'package:intl/intl.dart'; // for request date
+import 'dart:io'; // for File
+import 'package:intl/intl.dart';
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
@@ -20,24 +21,25 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
   final _titleController = TextEditingController();
   final _newSubjectController = TextEditingController();
   final _secretCodeController = TextEditingController();
-  final _searchController = TextEditingController(); // NEW: for search
+  final _searchController = TextEditingController();
 
   String _course = 'Maths';
   String _examType = 'Notes';
   bool _isUploading = false;
-  String _searchQuery = ''; // NEW: for search
+  String _searchQuery = '';
 
   final supabase = Supabase.instance.client;
   final firestore = FirebaseFirestore.instance;
   final uuid = const Uuid();
+  final ImagePicker _picker = ImagePicker(); // CHANGED
 
-  List<String> subjects = ['Maths', 'Physics', 'Chemistry', 'Biology']; // INITIAL
+  List<String> subjects = ['Maths', 'Physics', 'Chemistry', 'Biology'];
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
-    _loadSettings(); // Load both at once
+    _loadSettings();
   }
 
   Future<void> _loadSettings() async {
@@ -54,7 +56,6 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
         }
       });
     } else {
-      // CREATE DEFAULT IF NONE EXISTS
       await settingsRef.set({
         'subjects': subjects,
         'secretCode': '63-1678367V27PURE',
@@ -63,30 +64,28 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
     }
   }
 
-  Future<void> _uploadFile() async {
+  Future<void> _uploadFile() async { // CHANGED to use image_picker
     if (!_formKey.currentState!.validate()) return;
-    FilePickerResult? result = await FilePicker.platform.pickFiles(
-      type: FileType.custom, 
-      allowedExtensions: ['pdf', 'doc', 'docx', 'ppt', 'pptx'], 
-      withData: true
-    );
-    if (result == null) return;
-    Uint8List? fileBytes = result.files.first.bytes;
-    String fileName = '${uuid.v4()}_${result.files.first.name}';
+    
+    final XFile? image = await _picker.pickImage(source: ImageSource.gallery); // pick image
+    if (image == null) return;
+
+    Uint8List fileBytes = await image.readAsBytes();
+    String fileName = '${uuid.v4()}_${image.name}';
     setState(() => _isUploading = true);
     try {
-      await supabase.storage.from('examhook-files').uploadBinary(fileName, fileBytes!);
+      await supabase.storage.from('examhook-files').uploadBinary(fileName, fileBytes);
       String fileUrl = supabase.storage.from('examhook-files').getPublicUrl(fileName);
       await firestore.collection('resources').add({
         'title': _titleController.text,
         'course': _course,
         'examType': _examType,
         'fileUrl': fileUrl,
-        'fileName': fileName, // save full unique name for delete
-        'fileSize': result.files.first.size, 
+        'fileName': fileName,
+        'fileSize': fileBytes.length, 
         'likes': 0, 
         'rating': 0.0, 
-        'ratingCount': 0, // for rating math
+        'ratingCount': 0,
         'downloads': 0,
         'uploadedAt': FieldValue.serverTimestamp()
       });
@@ -128,7 +127,7 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
     }
   }
 
-  Future<void> _deleteSubject(String subject) async { // NEW
+  Future<void> _deleteSubject(String subject) async {
     setState(() => subjects.remove(subject));
     await firestore.collection('settings').doc('app').set({'subjects': subjects}, SetOptions(merge: true));
   }
@@ -138,7 +137,7 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Secret Code Updated'), backgroundColor: Colors.green));
   }
 
-  Future<void> _deleteRequest(String docId) async { // NEW
+  Future<void> _deleteRequest(String docId) async {
     await firestore.collection('requests').doc(docId).delete();
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Request Deleted'), backgroundColor: Colors.orange));
   }
@@ -162,7 +161,6 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
       body: TabBarView(
         controller: _tabController,
         children: [
-          // TAB 1: UPLOAD
           Padding(padding: const EdgeInsets.all(16), child: Form(key: _formKey, child: ListView(children: [
             TextFormField(controller: _titleController, decoration: const InputDecoration(labelText: 'Resource Title', border: OutlineInputBorder()), validator: (val) => val!.isEmpty? 'Enter title' : null),
             const SizedBox(height: 16),
@@ -170,10 +168,9 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(value: _examType, decoration: const InputDecoration(labelText: 'Exam Type', border: OutlineInputBorder()), items: ['ExamPrac', 'Notes', 'Quiz', 'Assignment'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(), onChanged: (val) => setState(() => _examType = val!)),
             const SizedBox(height: 24),
-            _isUploading? const Center(child: CircularProgressIndicator()) : ElevatedButton.icon(icon: const Icon(Icons.upload_file), label: const Text('Pick & Upload File'), style: ElevatedButton.styleFrom(backgroundColor: primaryGreen, minimumSize: const Size(double.infinity, 50)), onPressed: _uploadFile),
+            _isUploading? const Center(child: CircularProgressIndicator()) : ElevatedButton.icon(icon: const Icon(Icons.image), label: const Text('Pick & Upload Image'), style: ElevatedButton.styleFrom(backgroundColor: primaryGreen, minimumSize: const Size(double.infinity, 50)), onPressed: _uploadFile), // CHANGED TEXT
           ]))),
 
-          // TAB 2: MANAGE RESOURCES + SEARCH
           Column(
             children: [
               Padding(
@@ -196,7 +193,6 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
                     var docs = snapshot.data!.docs;
                     if (docs.isEmpty) return Center(child: Text('No resources yet', style: GoogleFonts.poppins()));
                     
-                    // FILTER BY SEARCH
                     if (_searchQuery.isNotEmpty) {
                       docs = docs.where((d) {
                         var data = d.data() as Map<String, dynamic>;
@@ -214,7 +210,7 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
                         return Card(
                           margin: const EdgeInsets.all(8),
                           child: ListTile(
-                            leading: const Icon(Icons.picture_as_pdf, color: Color(0xFF00C896)),
+                            leading: const Icon(Icons.image, color: Color(0xFF00C896)), // CHANGED ICON
                             title: Text(data['title'], style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
                             subtitle: Text('${data['course']} • ${data['examType']}\nLikes: ${data['likes']} • Rating: ${data['rating']?.toStringAsFixed(1)} • Downloads: ${data['downloads']}'),
                             trailing: IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () => _deleteResource(doc.id, data['fileName'])),
@@ -228,7 +224,6 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
             ],
           ),
 
-          // TAB 3: SETTINGS + DELETE REQUESTS
           Padding(padding: const EdgeInsets.all(16), child: ListView(children: [
             Text('Manage Subjects', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold)),
             Row(children: [
@@ -260,7 +255,7 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
                         '${data['message']?? ''}\n${data['timestamp']!= null ? DateFormat('dd MMM, hh:mm a').format((data['timestamp'] as Timestamp).toDate()) : ''}',
                         style: GoogleFonts.poppins(fontSize: 12),
                       ),
-                      trailing: IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () => _deleteRequest(d.id)), // DELETE BUTTON
+                      trailing: IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () => _deleteRequest(d.id)),
                     ),
                   );
                 }).toList());
