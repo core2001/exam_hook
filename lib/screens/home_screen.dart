@@ -4,9 +4,11 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:share_plus/share_plus.dart'; // NEW
+import 'package:share_plus/share_plus.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'admin_dashboard.dart';
-import 'dart:convert'; // NEW
+import 'pdf_viewer.dart';
+import 'student_upload.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -24,7 +26,9 @@ class _HomeScreenState extends State<HomeScreen> {
   String searchQuery = '';
   Set<String> likedDocs = {};
   Set<String> ratedDocs = {};
-  Set<String> favoriteDocs = {}; // NEW
+  Set<String> favoriteDocs = {};
+  Set<String> recentlyViewed = {};
+  List<String> myUploads = []; // NEW: track uploaded fileNames
   String _themeMode = 'light';
 
   int _tapCount = 0;
@@ -46,13 +50,38 @@ class _HomeScreenState extends State<HomeScreen> {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       if (mounted) setState(() {
         _themeMode = prefs.getString('theme_mode')?? 'light';
-        favoriteDocs = Set<String>.from(prefs.getStringList('favorites')?? []); // NEW
+        favoriteDocs = Set<String>.from(prefs.getStringList('favorites')?? []);
+        recentlyViewed = Set<String>.from(prefs.getStringList('recent')?? []);
+        myUploads = prefs.getStringList('my_uploads')?? []; // NEW
       });
       _checkTerms();
     } catch (e) { debugPrint("Prefs error: $e"); }
   }
 
-  Future<void> _toggleFavorite(String docId) async { // NEW
+  Future<void> _saveMyUpload(String fileName) async { // NEW
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    if (!myUploads.contains(fileName)) {
+      myUploads.add(fileName);
+      await prefs.setStringList('my_uploads', myUploads);
+    }
+  }
+
+  Future<void> _clearUploadHistory() async { // NEW
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.remove('my_uploads');
+    setState(() => myUploads.clear());
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Upload history cleared')));
+  }
+
+  Future<void> _saveRecent(String docId) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    recentlyViewed.remove(docId);
+    recentlyViewed.add(docId);
+    if (recentlyViewed.length > 10) recentlyViewed.remove(recentlyViewed.first);
+    await prefs.setStringList('recent', recentlyViewed.toList());
+  }
+
+  Future<void> _toggleFavorite(String docId) async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     setState(() {
       if (favoriteDocs.contains(docId)) {
@@ -119,12 +148,22 @@ class _HomeScreenState extends State<HomeScreen> {
     ));
   }
 
-  void _openLink(String docId, String url) async {
+  void _openResource(String docId, String url, String title) async {
+    await _saveRecent(docId);
     try { await _firestore.collection('resources').doc(docId).update({'downloads': FieldValue.increment(1)}); } catch(e){ debugPrint(e.toString()); }
-    if (await canLaunchUrl(Uri.parse(url))) await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+    
+    if (kIsWeb) {
+      if (await canLaunchUrl(Uri.parse(url))) await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+    } else {
+      if (url.toLowerCase().endsWith('.pdf')) {
+        Navigator.push(context, MaterialPageRoute(builder: (_) => PdfViewerScreen(url: url, title: title)));
+      } else {
+        if (await canLaunchUrl(Uri.parse(url))) await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      }
+    }
   }
 
-  void _shareResource(String title, String url) { // NEW
+  void _shareResource(String title, String url) {
     Share.share('Check out "$title" on ExamHook\n$url');
   }
 
@@ -174,6 +213,14 @@ class _HomeScreenState extends State<HomeScreen> {
     return _cardColors[index.abs()];
   }
 
+  IconData _getFileIcon(String url) {
+    if (url.contains('.pdf')) return Icons.picture_as_pdf;
+    if (url.contains('.jpg') || url.contains('.png')) return Icons.image;
+    if (url.contains('.mp4') || url.contains('.mov')) return Icons.video_file;
+    if (url.contains('.docx')) return Icons.description;
+    return Icons.insert_drive_file;
+  }
+
   @override
   Widget build(BuildContext context) {
     const Color primaryGreen = Color(0xFF00C896);
@@ -183,13 +230,13 @@ class _HomeScreenState extends State<HomeScreen> {
     return StreamBuilder<DocumentSnapshot>(
       stream: _firestore.collection('settings').doc('app').snapshots(),
       builder: (context, settingsSnap) {
-        List<String> liveSubjects = ['All', 'Maths', 'Physics', 'Chemistry', 'Biology', 'Favorites']; // ADDED FAVORITES
+        List<String> liveSubjects = ['All', 'Maths', 'Physics', 'Chemistry', 'Biology', 'Favorites', 'Recent', 'My Uploads']; // ADDED
 
         if (settingsSnap.hasData && settingsSnap.data!.exists) {
           var data = settingsSnap.data!.data() as Map<String, dynamic>?;
           if (data!= null && data['subjects']!= null) {
             List<String> dbSubjects = List<String>.from(data['subjects']);
-            liveSubjects = ['All',...dbSubjects, 'Favorites']; // Favorites always last
+            liveSubjects = ['All',...dbSubjects, 'Favorites', 'Recent', 'My Uploads'];
           }
         }
 
@@ -207,7 +254,10 @@ class _HomeScreenState extends State<HomeScreen> {
               title: GestureDetector(onTap: _handleHeaderTap, child: Text('ExamHook', style: GoogleFonts.poppins(fontWeight: FontWeight.bold))),
               backgroundColor: primaryGreen,
               elevation: 0,
-              actions: [IconButton(icon: const Icon(Icons.mail_outline), onPressed: _showRequestDialog)]
+              actions: [
+                IconButton(icon: const Icon(Icons.upload_file), onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const StudentUploadScreen()))),
+                IconButton(icon: const Icon(Icons.mail_outline), onPressed: _showRequestDialog)
+              ]
             ),
             drawer: Drawer(
               child: Column(
@@ -243,13 +293,25 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                   const Divider(),
+                  ListTile(
+                    leading: Icon(Icons.upload_file, color: primaryGreen),
+                    title: Text('Contribute Resource', style: GoogleFonts.poppins()),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const StudentUploadScreen()));
+                    },
+                  ),
                   Expanded(
                     child: ListView.builder(
                       itemCount: liveSubjects.length,
                       itemBuilder: (context, index) {
                         String subject = liveSubjects[index];
+                        IconData icon = Icons.book;
+                        if (subject == 'Favorites') icon = Icons.bookmark;
+                        if (subject == 'Recent') icon = Icons.history;
+                        if (subject == 'My Uploads') icon = Icons.cloud_upload; // NEW
                         return ListTile(
-                          leading: Icon(subject == 'Favorites'? Icons.bookmark : Icons.book, color: primaryGreen), // NEW ICON
+                          leading: Icon(icon, color: primaryGreen),
                           title: Text(subject, style: GoogleFonts.poppins()),
                           selected: selectedCourse == subject,
                           selectedTileColor: primaryGreen.withOpacity(0.1),
@@ -264,6 +326,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   ListTile(leading: Icon(Icons.description, color: primaryGreen), title: Text('Terms & Conditions', style: GoogleFonts.poppins()), onTap: _showTermsDialog),
                 ],
               ),
+            ),
+            floatingActionButton: FloatingActionButton.extended(
+              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const StudentUploadScreen())),
+              backgroundColor: primaryGreen,
+              icon: const Icon(Icons.add),
+              label: Text('Upload', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
             ),
             body: Column(
               children: [
@@ -281,6 +349,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     onChanged: (val) => setState(() => searchQuery = val.toLowerCase()),
                   )
                 ),
+                if (selectedCourse!= 'My Uploads') // hide dropdown for My Uploads
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   child: DropdownButtonFormField<String>(
@@ -298,7 +367,69 @@ class _HomeScreenState extends State<HomeScreen> {
                       if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
                       if (snapshot.hasError) return Center(child: Padding(padding: EdgeInsets.all(20), child: Text('Error: ${snapshot.error}')));
 
-                      if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                      var docs = snapshot.data!.docs;
+
+                      // FILTER LOGIC
+                      if (selectedCourse == 'Favorites') {
+                        docs = docs.where((d) => favoriteDocs.contains(d.id)).toList();
+                      } else if (selectedCourse == 'Recent') {
+                        docs = docs.where((d) => recentlyViewed.contains(d.id)).toList();
+                      } else if (selectedCourse == 'My Uploads') { // NEW
+                        return StreamBuilder<QuerySnapshot>(
+                          stream: _firestore.collection('resources_pending').orderBy('uploadedAt', descending: true).snapshots(),
+                          builder: (context, pendingSnap) {
+                            List<QueryDocumentSnapshot> allDocs = [];
+                            if (pendingSnap.hasData) allDocs.addAll(pendingSnap.data!.docs);
+                            if (snapshot.hasData) allDocs.addAll(snapshot.data!.docs);
+                            
+                            // only show docs where filename is in myUploads
+                            var myDocs = allDocs.where((d) => myUploads.contains((d.data() as Map)['fileName'])).toList();
+
+                            if (myDocs.isEmpty) {
+                              return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                                Icon(Icons.cloud_upload, size: 80, color: Colors.grey),
+                                SizedBox(height: 16),
+                                Text('No uploads yet', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600)),
+                                TextButton(onPressed: _clearUploadHistory, child: Text('Clear History')) // NEW
+                              ]));
+                            }
+
+                            return Column(
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                  child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                                    Text('Your Uploads', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 16)),
+                                    TextButton.icon(onPressed: _clearUploadHistory, icon: Icon(Icons.delete_outline, size: 18), label: Text('Clear'))
+                                  ]),
+                                ),
+                                Expanded(
+                                  child: ListView.builder(itemCount: myDocs.length, itemBuilder: (context, index) {
+                                    var doc = myDocs[index]; var data = doc.data() as Map<String, dynamic>;
+                                    bool isPending = doc.reference.parent.id == 'resources_pending';
+                                    return Card(
+                                      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                      child: ListTile(
+                                        leading: Icon(_getFileIcon(data['fileUrl']?? ''), color: isPending? Colors.orange : primaryGreen),
+                                        title: Text(data['title']?? '', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                                        subtitle: Text('${data['course']} • ${data['examType']}\nStatus: ${isPending? 'Pending Review' : 'Approved'}'),
+                                      ),
+                                    );
+                                  }),
+                                ),
+                              ],
+                            );
+                          }
+                        );
+                      } else if (selectedCourse!= 'All') {
+                        docs = docs.where((d) => (d.data() as Map)['course'] == selectedCourse).toList();
+                      }
+                      if (searchQuery.isNotEmpty) docs = docs.where((d) {
+                        var data = d.data() as Map;
+                        return data['title'].toString().toLowerCase().contains(searchQuery) || data['course'].toString().toLowerCase().contains(searchQuery);
+                      }).toList();
+
+                      if (!snapshot.hasData || docs.isEmpty) {
                         return Center(
                           child: Padding(
                             padding: const EdgeInsets.all(24),
@@ -309,12 +440,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                 const SizedBox(height: 20),
                                 Text('No resources yet', style: GoogleFonts.poppins(fontSize: 22, fontWeight: FontWeight.bold)),
                                 const SizedBox(height: 8),
-                                Text('Ask the admin to upload notes, past papers and quizzes', textAlign: TextAlign.center, style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey)),
+                                Text('Be the first to upload or request notes', textAlign: TextAlign.center, style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey)),
                                 const SizedBox(height: 20),
                                 ElevatedButton.icon(
-                                  onPressed: _showRequestDialog,
-                                  icon: const Icon(Icons.mail),
-                                  label: const Text('Request Notes'),
+                                  onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const StudentUploadScreen())),
+                                  icon: const Icon(Icons.upload_file),
+                                  label: const Text('Upload Resource'),
                                   style: ElevatedButton.styleFrom(backgroundColor: primaryGreen, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                                 )
                               ],
@@ -323,30 +454,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         );
                       }
 
-                      var docs = snapshot.data!.docs;
-                      if (selectedCourse == 'Favorites') { // NEW FILTER
-                        docs = docs.where((d) => favoriteDocs.contains(d.id)).toList();
-                      } else if (selectedCourse!= 'All') {
-                        docs = docs.where((d) => (d.data() as Map)['course'] == selectedCourse).toList();
-                      }
-                      if (searchQuery.isNotEmpty) docs = docs.where((d) {
-                        var data = d.data() as Map;
-                        return data['title'].toString().toLowerCase().contains(searchQuery) || data['course'].toString().toLowerCase().contains(searchQuery);
-                      }).toList();
-
-                      if (selectedCourse == 'Favorites' && docs.isEmpty) { // NEW EMPTY STATE
-                        return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                          Icon(Icons.bookmark_border, size: 80, color: Colors.grey),
-                          SizedBox(height: 16),
-                          Text('No favorites yet', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600)),
-                          Text('Tap the bookmark icon to save resources', style: GoogleFonts.poppins(color: Colors.grey))
-                        ]));
-                      }
-
                       return ListView.builder(itemCount: docs.length, itemBuilder: (context, index) {
                         var doc = docs[index]; var data = doc.data() as Map<String, dynamic>; String docId = doc.id;
                         bool isLiked = likedDocs.contains(docId); bool isRated = ratedDocs.contains(docId);
-                        bool isFav = favoriteDocs.contains(docId); // NEW
+                        bool isFav = favoriteDocs.contains(docId);
                         Color cardColor = _getCardColor(data['course']?? '');
 
                         return Card(
@@ -363,7 +474,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               padding: const EdgeInsets.all(14),
                               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                                 Row(children: [
-                                  Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: cardColor.withOpacity(0.2), borderRadius: BorderRadius.circular(12)), child: Icon(Icons.image, color: cardColor, size: 28)),
+                                  Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: cardColor.withOpacity(0.2), borderRadius: BorderRadius.circular(12)), child: Icon(_getFileIcon(data['fileUrl']?? ''), color: cardColor, size: 28)),
                                   const SizedBox(width: 12),
                                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                                     Text(data['title']?? 'No Title', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 16)),
@@ -373,9 +484,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                       child: Text('${data['course']} • ${data['examType']}', style: GoogleFonts.poppins(fontSize: 11, color: Colors.white))
                                     )
                                   ])),
-                                  IconButton(icon: Icon(isFav? Icons.bookmark : Icons.bookmark_border, color: primaryGreen), onPressed: () => _toggleFavorite(docId)), // NEW
-                                  IconButton(icon: const Icon(Icons.share, color: Colors.grey, size: 24), onPressed: () => _shareResource(data['title'], data['fileUrl'])), // NEW
-                                  IconButton(icon: const Icon(Icons.download_for_offline, color: secondaryBlue, size: 30), onPressed: () => _openLink(docId, data['fileUrl']))
+                                  IconButton(icon: Icon(isFav? Icons.bookmark : Icons.bookmark_border, color: primaryGreen), onPressed: () => _toggleFavorite(docId)),
+                                  IconButton(icon: const Icon(Icons.share, color: Colors.grey, size: 24), onPressed: () => _shareResource(data['title'], data['fileUrl'])),
+                                  IconButton(icon: const Icon(Icons.open_in_new, color: secondaryBlue, size: 28), onPressed: () => _openResource(docId, data['fileUrl'], data['title']))
                                 ]),
                                 const SizedBox(height: 10),
                                 Row(children: [Icon(Icons.calendar_today, size: 12, color: Colors.grey), const SizedBox(width: 4), Text(_formatDate(data['uploadedAt']), style: GoogleFonts.poppins(fontSize: 11)), const SizedBox(width: 12), Icon(Icons.data_object, size: 12, color: Colors.grey), const SizedBox(width: 4), Text(_formatBytes((data['fileSize']?? 0).toInt()), style: GoogleFonts.poppins(fontSize: 11))]),
