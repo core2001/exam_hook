@@ -3,9 +3,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:uuid/uuid.dart';
-import 'package:image_picker/image_picker.dart'; // CHANGED
+import 'package:image_picker/image_picker.dart';
 import 'dart:typed_data';
-import 'dart:io'; // for File
 import 'package:intl/intl.dart';
 
 class AdminDashboard extends StatefulWidget {
@@ -20,7 +19,6 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
   final _newSubjectController = TextEditingController();
-  final _secretCodeController = TextEditingController();
   final _searchController = TextEditingController();
 
   String _course = 'Maths';
@@ -31,7 +29,7 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
   final supabase = Supabase.instance.client;
   final firestore = FirebaseFirestore.instance;
   final uuid = const Uuid();
-  final ImagePicker _picker = ImagePicker(); // CHANGED
+  final ImagePicker _picker = ImagePicker();
 
   List<String> subjects = ['Maths', 'Physics', 'Chemistry', 'Biology'];
 
@@ -43,31 +41,30 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
   }
 
   Future<void> _loadSettings() async {
-    DocumentReference settingsRef = firestore.collection('settings').doc('app');
-    DocumentSnapshot doc = await settingsRef.get();
-    
-    if (doc.exists) {
-      setState(() {
-        if (doc['subjects']!= null) subjects = List<String>.from(doc['subjects']);
-        if (doc['secretCode']!= null) {
-          _secretCodeController.text = doc['secretCode'];
-        } else {
-          _secretCodeController.text = '63-1678367V27PURE';
+    try {
+      DocumentReference settingsRef = firestore.collection('settings').doc('app');
+      DocumentSnapshot doc = await settingsRef.get();
+
+      if (doc.exists) {
+        var data = doc.data() as Map<String, dynamic>?;
+        if (data!= null && data['subjects']!= null) {
+          setState(() {
+            subjects = List<String>.from(data['subjects']);
+          });
         }
-      });
-    } else {
-      await settingsRef.set({
-        'subjects': subjects,
-        'secretCode': '63-1678367V27PURE',
-      });
-      _secretCodeController.text = '63-1678367V27PURE';
+      } else {
+        // create doc with defaults if missing
+        await settingsRef.set({'subjects': subjects}, SetOptions(merge: true));
+      }
+    } catch (e) {
+      debugPrint("Load settings error: $e");
     }
   }
 
-  Future<void> _uploadFile() async { // CHANGED to use image_picker
+  Future<void> _uploadFile() async {
     if (!_formKey.currentState!.validate()) return;
-    
-    final XFile? image = await _picker.pickImage(source: ImageSource.gallery); // pick image
+
+    final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
     if (image == null) return;
 
     Uint8List fileBytes = await image.readAsBytes();
@@ -82,9 +79,9 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
         'examType': _examType,
         'fileUrl': fileUrl,
         'fileName': fileName,
-        'fileSize': fileBytes.length, 
-        'likes': 0, 
-        'rating': 0.0, 
+        'fileSize': fileBytes.length,
+        'likes': 0,
+        'rating': 0.0,
         'ratingCount': 0,
         'downloads': 0,
         'uploadedAt': FieldValue.serverTimestamp()
@@ -111,7 +108,9 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
     )?? false;
 
     if (confirm) {
-      await supabase.storage.from('examhook-files').remove([fileName]);
+      try {
+        await supabase.storage.from('examhook-files').remove([fileName]);
+      } catch(e){ debugPrint("Supabase delete error: $e"); }
       await firestore.collection('resources').doc(docId).delete();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Deleted'), backgroundColor: Colors.orange));
     }
@@ -130,11 +129,6 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
   Future<void> _deleteSubject(String subject) async {
     setState(() => subjects.remove(subject));
     await firestore.collection('settings').doc('app').set({'subjects': subjects}, SetOptions(merge: true));
-  }
-
-  Future<void> _saveSecretCode() async {
-    await firestore.collection('settings').doc('app').set({'secretCode': _secretCodeController.text}, SetOptions(merge: true));
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Secret Code Updated'), backgroundColor: Colors.green));
   }
 
   Future<void> _deleteRequest(String docId) async {
@@ -161,6 +155,7 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
       body: TabBarView(
         controller: _tabController,
         children: [
+          // TAB 1: UPLOAD
           Padding(padding: const EdgeInsets.all(16), child: Form(key: _formKey, child: ListView(children: [
             TextFormField(controller: _titleController, decoration: const InputDecoration(labelText: 'Resource Title', border: OutlineInputBorder()), validator: (val) => val!.isEmpty? 'Enter title' : null),
             const SizedBox(height: 16),
@@ -168,9 +163,10 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(value: _examType, decoration: const InputDecoration(labelText: 'Exam Type', border: OutlineInputBorder()), items: ['ExamPrac', 'Notes', 'Quiz', 'Assignment'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(), onChanged: (val) => setState(() => _examType = val!)),
             const SizedBox(height: 24),
-            _isUploading? const Center(child: CircularProgressIndicator()) : ElevatedButton.icon(icon: const Icon(Icons.image), label: const Text('Pick & Upload Image'), style: ElevatedButton.styleFrom(backgroundColor: primaryGreen, minimumSize: const Size(double.infinity, 50)), onPressed: _uploadFile), // CHANGED TEXT
+            _isUploading? const Center(child: CircularProgressIndicator()) : ElevatedButton.icon(icon: const Icon(Icons.image), label: const Text('Pick & Upload Image'), style: ElevatedButton.styleFrom(backgroundColor: primaryGreen, minimumSize: const Size(double.infinity, 50)), onPressed: _uploadFile),
           ]))),
 
+          // TAB 2: MANAGE
           Column(
             children: [
               Padding(
@@ -189,10 +185,11 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
                 child: StreamBuilder<QuerySnapshot>(
                   stream: firestore.collection('resources').orderBy('uploadedAt', descending: true).snapshots(),
                   builder: (context, snapshot) {
-                    if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                    if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+                    if (snapshot.hasError) return Center(child: Text('Error: ${snapshot.error}'));
+                    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return Center(child: Text('No resources yet', style: GoogleFonts.poppins()));
+
                     var docs = snapshot.data!.docs;
-                    if (docs.isEmpty) return Center(child: Text('No resources yet', style: GoogleFonts.poppins()));
-                    
                     if (_searchQuery.isNotEmpty) {
                       docs = docs.where((d) {
                         var data = d.data() as Map<String, dynamic>;
@@ -210,9 +207,9 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
                         return Card(
                           margin: const EdgeInsets.all(8),
                           child: ListTile(
-                            leading: const Icon(Icons.image, color: Color(0xFF00C896)), // CHANGED ICON
-                            title: Text(data['title'], style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-                            subtitle: Text('${data['course']} • ${data['examType']}\nLikes: ${data['likes']} • Rating: ${data['rating']?.toStringAsFixed(1)} • Downloads: ${data['downloads']}'),
+                            leading: const Icon(Icons.image, color: Color(0xFF00C896)),
+                            title: Text(data['title']?? '', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                            subtitle: Text('${data['course']} • ${data['examType']}\nLikes: ${data['likes']} • Rating: ${(data['rating']??0.0).toDouble().toStringAsFixed(1)} • Downloads: ${data['downloads']}'),
                             trailing: IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () => _deleteResource(doc.id, data['fileName'])),
                           ),
                         );
@@ -224,6 +221,7 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
             ],
           ),
 
+          // TAB 3: SETTINGS + REQUESTS
           Padding(padding: const EdgeInsets.all(16), child: ListView(children: [
             Text('Manage Subjects', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold)),
             Row(children: [
@@ -233,18 +231,15 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
             const SizedBox(height: 10),
             Wrap(spacing: 8, children: subjects.map((s) => Chip(label: Text(s), deleteIcon: const Icon(Icons.close, size: 18), onDeleted: () => _deleteSubject(s))).toList()),
             const Divider(height: 40),
-            Text('Change Admin Secret Code', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold)),
-            TextField(controller: _secretCodeController, decoration: const InputDecoration(labelText: 'Secret Code')),
-            const SizedBox(height: 12),
-            ElevatedButton(onPressed: _saveSecretCode, child: const Text('Save Code'), style: ElevatedButton.styleFrom(backgroundColor: primaryGreen)),
-            const Divider(height: 40),
             Text('User Requests', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 10),
             StreamBuilder<QuerySnapshot>(
               stream: firestore.collection('requests').orderBy('timestamp', descending: true).snapshots(),
               builder: (context, snap) {
-                if (!snap.hasData) return const Text('Loading...');
-                if (snap.data!.docs.isEmpty) return const Text('No requests yet');
+                if (snap.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+                if (snap.hasError) return Text('Error: ${snap.error}');
+                if (!snap.hasData || snap.data!.docs.isEmpty) return Center(child: Padding(padding: EdgeInsets.all(20), child: Text('No requests yet', style: GoogleFonts.poppins(color: Colors.grey))));
+
                 return Column(children: snap.data!.docs.map((d) {
                   var data = d.data() as Map<String, dynamic>;
                   return Card(
@@ -252,7 +247,7 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
                       leading: const Icon(Icons.mail, color: Colors.orange),
                       title: Text(data['subject']?? 'No Subject', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
                       subtitle: Text(
-                        '${data['message']?? ''}\n${data['timestamp']!= null ? DateFormat('dd MMM, hh:mm a').format((data['timestamp'] as Timestamp).toDate()) : ''}',
+                        '${data['message']?? ''}\n${data['timestamp']!= null? DateFormat('dd MMM, hh:mm a').format((data['timestamp'] as Timestamp).toDate()) : ''}',
                         style: GoogleFonts.poppins(fontSize: 12),
                       ),
                       trailing: IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () => _deleteRequest(d.id)),

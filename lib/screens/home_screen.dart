@@ -24,7 +24,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Set<String> ratedDocs = {};
   String _themeMode = 'light';
 
-  // FOR 5-TAP ADMIN ACCESS
   int _tapCount = 0;
   DateTime? _lastTapTime;
 
@@ -45,15 +44,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadPrefs() async {
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
-      if (mounted) {
-        setState(() {
-          _themeMode = prefs.getString('theme_mode')?? 'light';
-        });
-      }
+      if (mounted) setState(() => _themeMode = prefs.getString('theme_mode')?? 'light');
       _checkTerms();
-    } catch (e) {
-      debugPrint("Prefs error: $e");
-    }
+    } catch (e) { debugPrint("Prefs error: $e"); }
   }
 
   Future<void> _saveTheme(String theme) async {
@@ -94,7 +87,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 await _firestore.collection('requests').add({
                   'subject': _requestController.text,
                   'message': 'User requested: ${_requestController.text}',
-                  'timestamp': FieldValue.serverTimestamp()
+                  'timestamp': FieldValue.serverTimestamp(),
+                  'status': 'pending'
                 });
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Request sent to Admin!'), backgroundColor: Colors.green));
@@ -111,18 +105,13 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _openLink(String docId, String url) async {
-    try {
-      await _firestore.collection('resources').doc(docId).update({'downloads': FieldValue.increment(1)});
-    } catch(e) { debugPrint("Download update failed: $e"); }
+    try { await _firestore.collection('resources').doc(docId).update({'downloads': FieldValue.increment(1)}); } catch(e){ debugPrint(e.toString()); }
     if (await canLaunchUrl(Uri.parse(url))) await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
   }
 
   void _likeResource(String docId) async {
     if (likedDocs.contains(docId)) return;
-    try {
-      await _firestore.collection('resources').doc(docId).update({'likes': FieldValue.increment(1)});
-      setState(() => likedDocs.add(docId));
-    } catch(e) { debugPrint("Like failed: $e"); }
+    try { await _firestore.collection('resources').doc(docId).update({'likes': FieldValue.increment(1)}); setState(() => likedDocs.add(docId)); } catch(e){ debugPrint(e.toString()); }
   }
 
   void _rateResource(String docId, double rating) async {
@@ -134,16 +123,14 @@ class _HomeScreenState extends State<HomeScreen> {
       double newRating = ((currentRating * ratingCount) + rating) / (ratingCount + 1);
       await _firestore.collection('resources').doc(docId).update({'rating': newRating, 'ratingCount': FieldValue.increment(1)});
       setState(() => ratedDocs.add(docId));
-    } catch(e) { debugPrint("Rate failed: $e"); }
+    } catch(e){ debugPrint(e.toString()); }
   }
 
   void _handleHeaderTap() {
     final now = DateTime.now();
     if (_lastTapTime == null || now.difference(_lastTapTime!) > const Duration(seconds: 2)) {
       _tapCount = 1;
-    } else {
-      _tapCount++;
-    }
+    } else { _tapCount++; }
     _lastTapTime = now;
 
     if (_tapCount >= 5) {
@@ -175,18 +162,10 @@ class _HomeScreenState extends State<HomeScreen> {
     const Color secondaryBlue = Color(0xFF3B82F6);
     bool isDark = _themeMode == 'dark';
 
-    return StreamBuilder<DocumentSnapshot>(
+    return StreamBuilder<DocumentSnapshot>( // KEY CHANGE: LISTEN LIVE
       stream: _firestore.collection('settings').doc('app').snapshots(),
       builder: (context, settingsSnap) {
-        // FIX 1: Handle loading + error so it doesn't white screen
-        if (settingsSnap.connectionState == ConnectionState.waiting) {
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
-        }
-        if (settingsSnap.hasError) {
-          return Scaffold(body: Center(child: Text('Settings Error: ${settingsSnap.error}')));
-        }
-
-        List<String> liveSubjects = ['All', 'Maths', 'Physics', 'Chemistry', 'Biology'];
+        List<String> liveSubjects = ['All', 'Maths', 'Physics', 'Chemistry', 'Biology']; // fallback
 
         if (settingsSnap.hasData && settingsSnap.data!.exists) {
           var data = settingsSnap.data!.data() as Map<String, dynamic>?;
@@ -207,10 +186,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           child: Scaffold(
             appBar: AppBar(
-              title: GestureDetector(
-                onTap: _handleHeaderTap,
-                child: Text('ExamHook', style: GoogleFonts.poppins(fontWeight: FontWeight.bold))
-              ),
+              title: GestureDetector(onTap: _handleHeaderTap, child: Text('ExamHook', style: GoogleFonts.poppins(fontWeight: FontWeight.bold))),
               backgroundColor: primaryGreen,
               elevation: 0,
               actions: [IconButton(icon: const Icon(Icons.mail_outline), onPressed: _showRequestDialog)]
@@ -223,10 +199,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        GestureDetector(
-                          onTap: _handleHeaderTap,
-                          child: const Icon(Icons.school, size: 60, color: Colors.white),
-                        ),
+                        GestureDetector(onTap: _handleHeaderTap, child: const Icon(Icons.school, size: 60, color: Colors.white)),
                         const SizedBox(height: 10),
                         Text('ExamHook', style: GoogleFonts.poppins(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
                         Text('Subjects', style: GoogleFonts.poppins(color: Colors.white70, fontSize: 14)),
@@ -246,9 +219,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             ButtonSegment(value: 'dark', label: Text('Dark'), icon: Icon(Icons.dark_mode)),
                           ],
                           selected: {_themeMode},
-                          onSelectionChanged: (newSelection) {
-                            _saveTheme(newSelection.first);
-                          },
+                          onSelectionChanged: (newSelection) => _saveTheme(newSelection.first),
                         ),
                       ],
                     ),
@@ -306,7 +277,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: StreamBuilder<QuerySnapshot>(
                     stream: _firestore.collection('resources').orderBy('uploadedAt', descending: true).snapshots(),
                     builder: (context, snapshot) {
-                      // FIX 2: Handle loading + error
                       if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
                       if (snapshot.hasError) return Center(child: Padding(padding: EdgeInsets.all(20), child: Text('Error: ${snapshot.error}')));
 
@@ -343,11 +313,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       }).toList();
 
                       return ListView.builder(itemCount: docs.length, itemBuilder: (context, index) {
-                        var doc = docs[index];
-                        var data = doc.data() as Map<String, dynamic>;
-                        String docId = doc.id;
-                        bool isLiked = likedDocs.contains(docId);
-                        bool isRated = ratedDocs.contains(docId);
+                        var doc = docs[index]; var data = doc.data() as Map<String, dynamic>; String docId = doc.id;
+                        bool isLiked = likedDocs.contains(docId); bool isRated = ratedDocs.contains(docId);
                         Color cardColor = _getCardColor(data['course']?? '');
 
                         return Card(
@@ -357,18 +324,14 @@ class _HomeScreenState extends State<HomeScreen> {
                           child: Container(
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(20),
-                              gradient: LinearGradient(
-                                colors: [cardColor.withOpacity(0.1), cardColor.withOpacity(0.02)],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
+                              gradient: LinearGradient(colors: [cardColor.withOpacity(0.1), cardColor.withOpacity(0.02)], begin: Alignment.topLeft, end: Alignment.bottomRight),
                               border: Border.all(color: cardColor.withOpacity(0.3))
                             ),
                             child: Padding(
                               padding: const EdgeInsets.all(14),
                               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                                 Row(children: [
-                                  Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: cardColor.withOpacity(0.2), borderRadius: BorderRadius.circular(12)), child: Icon(Icons.picture_as_pdf, color: cardColor, size: 28)),
+                                  Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: cardColor.withOpacity(0.2), borderRadius: BorderRadius.circular(12)), child: Icon(Icons.image, color: cardColor, size: 28)),
                                   const SizedBox(width: 12),
                                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                                     Text(data['title']?? 'No Title', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 16)),
