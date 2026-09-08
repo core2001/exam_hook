@@ -22,13 +22,13 @@ class _HomeScreenState extends State<HomeScreen> {
   String searchQuery = '';
   Set<String> likedDocs = {};
   Set<String> ratedDocs = {};
-  String _themeMode = 'light'; // NEW: for theme
+  String _themeMode = 'light';
 
   // FOR 5-TAP ADMIN ACCESS
   int _tapCount = 0;
   DateTime? _lastTapTime;
 
-  final List<Color> _cardColors = [ // NEW: colorful cards
+  final List<Color> _cardColors = [
     const Color(0xFF00C896),
     const Color(0xFF3B82F6),
     const Color(0xFFF59E0B),
@@ -43,11 +43,17 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadPrefs() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _themeMode = prefs.getString('theme_mode')?? 'light';
-    });
-    _checkTerms();
+    try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      if (mounted) {
+        setState(() {
+          _themeMode = prefs.getString('theme_mode')?? 'light';
+        });
+      }
+      _checkTerms();
+    } catch (e) {
+      debugPrint("Prefs error: $e");
+    }
   }
 
   Future<void> _saveTheme(String theme) async {
@@ -76,28 +82,59 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _showRequestDialog() {
     _requestController.clear();
-    showDialog(context: context, builder: (context) => AlertDialog(title: Text('Request Notes', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)), content: TextField(controller: _requestController, decoration: const InputDecoration(labelText: 'What subject/topic do you need?', border: OutlineInputBorder()), maxLines: 3), actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')), ElevatedButton(onPressed: () async {if (_requestController.text.isNotEmpty) {await _firestore.collection('requests').add({'subject': _requestController.text, 'message': 'User requested: ${_requestController.text}', 'timestamp': FieldValue.serverTimestamp()}); Navigator.pop(context); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Request sent to Admin!'), backgroundColor: Colors.green));}}, style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00C896)), child: const Text('Send Request'))]));
+    showDialog(context: context, builder: (context) => AlertDialog(
+      title: Text('Request Notes', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+      content: TextField(controller: _requestController, decoration: const InputDecoration(labelText: 'What subject/topic do you need?', border: OutlineInputBorder()), maxLines: 3),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        ElevatedButton(
+          onPressed: () async {
+            if (_requestController.text.isNotEmpty) {
+              try {
+                await _firestore.collection('requests').add({
+                  'subject': _requestController.text,
+                  'message': 'User requested: ${_requestController.text}',
+                  'timestamp': FieldValue.serverTimestamp()
+                });
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Request sent to Admin!'), backgroundColor: Colors.green));
+              } catch(e) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to send: $e'), backgroundColor: Colors.red));
+              }
+            }
+          },
+          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00C896)),
+          child: const Text('Send Request')
+        )
+      ]
+    ));
   }
 
   void _openLink(String docId, String url) async {
-    await _firestore.collection('resources').doc(docId).update({'downloads': FieldValue.increment(1)});
+    try {
+      await _firestore.collection('resources').doc(docId).update({'downloads': FieldValue.increment(1)});
+    } catch(e) { debugPrint("Download update failed: $e"); }
     if (await canLaunchUrl(Uri.parse(url))) await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
   }
 
   void _likeResource(String docId) async {
     if (likedDocs.contains(docId)) return;
-    await _firestore.collection('resources').doc(docId).update({'likes': FieldValue.increment(1)});
-    setState(() => likedDocs.add(docId));
+    try {
+      await _firestore.collection('resources').doc(docId).update({'likes': FieldValue.increment(1)});
+      setState(() => likedDocs.add(docId));
+    } catch(e) { debugPrint("Like failed: $e"); }
   }
 
   void _rateResource(String docId, double rating) async {
     if (ratedDocs.contains(docId)) return;
-    DocumentSnapshot doc = await _firestore.collection('resources').doc(docId).get();
-    double currentRating = doc['rating']?? 0.0;
-    int ratingCount = doc['ratingCount']?? 0;
-    double newRating = ((currentRating * ratingCount) + rating) / (ratingCount + 1);
-    await _firestore.collection('resources').doc(docId).update({'rating': newRating, 'ratingCount': FieldValue.increment(1)});
-    setState(() => ratedDocs.add(docId));
+    try {
+      DocumentSnapshot doc = await _firestore.collection('resources').doc(docId).get();
+      double currentRating = (doc['rating']?? 0.0).toDouble();
+      int ratingCount = (doc['ratingCount']?? 0).toInt();
+      double newRating = ((currentRating * ratingCount) + rating) / (ratingCount + 1);
+      await _firestore.collection('resources').doc(docId).update({'rating': newRating, 'ratingCount': FieldValue.increment(1)});
+      setState(() => ratedDocs.add(docId));
+    } catch(e) { debugPrint("Rate failed: $e"); }
   }
 
   void _handleHeaderTap() {
@@ -127,7 +164,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return '${(bytes / 1048576).toStringAsFixed(1)} MB';
   }
 
-  Color _getCardColor(String course) { // NEW: consistent color per subject
+  Color _getCardColor(String course) {
     int index = course.hashCode % _cardColors.length;
     return _cardColors[index.abs()];
   }
@@ -141,11 +178,19 @@ class _HomeScreenState extends State<HomeScreen> {
     return StreamBuilder<DocumentSnapshot>(
       stream: _firestore.collection('settings').doc('app').snapshots(),
       builder: (context, settingsSnap) {
+        // FIX 1: Handle loading + error so it doesn't white screen
+        if (settingsSnap.connectionState == ConnectionState.waiting) {
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        }
+        if (settingsSnap.hasError) {
+          return Scaffold(body: Center(child: Text('Settings Error: ${settingsSnap.error}')));
+        }
+
         List<String> liveSubjects = ['All', 'Maths', 'Physics', 'Chemistry', 'Biology'];
 
         if (settingsSnap.hasData && settingsSnap.data!.exists) {
-          var data = settingsSnap.data!.data() as Map<String, dynamic>;
-          if (data['subjects']!= null) {
+          var data = settingsSnap.data!.data() as Map<String, dynamic>?;
+          if (data!= null && data['subjects']!= null) {
             List<String> dbSubjects = List<String>.from(data['subjects']);
             liveSubjects = ['All',...dbSubjects];
           }
@@ -153,7 +198,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
         if (!liveSubjects.contains(selectedCourse)) selectedCourse = 'All';
 
-        return Theme( // NEW: Theme wrapper
+        return Theme(
           data: ThemeData(
             brightness: isDark? Brightness.dark : Brightness.light,
             primaryColor: primaryGreen,
@@ -162,12 +207,12 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           child: Scaffold(
             appBar: AppBar(
-              title: GestureDetector( // also allow 5 tap on appbar title
+              title: GestureDetector(
                 onTap: _handleHeaderTap,
                 child: Text('ExamHook', style: GoogleFonts.poppins(fontWeight: FontWeight.bold))
-              ), 
-              backgroundColor: primaryGreen, 
-              elevation: 0, 
+              ),
+              backgroundColor: primaryGreen,
+              elevation: 0,
               actions: [IconButton(icon: const Icon(Icons.mail_outline), onPressed: _showRequestDialog)]
             ),
             drawer: Drawer(
@@ -188,7 +233,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       ],
                     )
                   ),
-                  // NEW: THEME SWITCHER
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     child: Column(
@@ -262,9 +306,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: StreamBuilder<QuerySnapshot>(
                     stream: _firestore.collection('resources').orderBy('uploadedAt', descending: true).snapshots(),
                     builder: (context, snapshot) {
+                      // FIX 2: Handle loading + error
                       if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-                      
-                      if (!snapshot.hasData || snapshot.data!.docs.isEmpty) { // NEW: ATTRACTIVE EMPTY STATE
+                      if (snapshot.hasError) return Center(child: Padding(padding: EdgeInsets.all(20), child: Text('Error: ${snapshot.error}')));
+
+                      if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                         return Center(
                           child: Padding(
                             padding: const EdgeInsets.all(24),
@@ -290,19 +336,25 @@ class _HomeScreenState extends State<HomeScreen> {
                       }
 
                       var docs = snapshot.data!.docs;
-                      if (selectedCourse!= 'All') docs = docs.where((d) => d['course'] == selectedCourse).toList();
-                      if (searchQuery.isNotEmpty) docs = docs.where((d) => d['title'].toString().toLowerCase().contains(searchQuery) || d['course'].toString().toLowerCase().contains(searchQuery)).toList();
-                      
+                      if (selectedCourse!= 'All') docs = docs.where((d) => (d.data() as Map)['course'] == selectedCourse).toList();
+                      if (searchQuery.isNotEmpty) docs = docs.where((d) {
+                        var data = d.data() as Map;
+                        return data['title'].toString().toLowerCase().contains(searchQuery) || data['course'].toString().toLowerCase().contains(searchQuery);
+                      }).toList();
+
                       return ListView.builder(itemCount: docs.length, itemBuilder: (context, index) {
-                        var doc = docs[index]; var data = doc.data() as Map<String, dynamic>; String docId = doc.id;
-                        bool isLiked = likedDocs.contains(docId); bool isRated = ratedDocs.contains(docId);
-                        Color cardColor = _getCardColor(data['course']?? ''); // NEW: colorful
+                        var doc = docs[index];
+                        var data = doc.data() as Map<String, dynamic>;
+                        String docId = doc.id;
+                        bool isLiked = likedDocs.contains(docId);
+                        bool isRated = ratedDocs.contains(docId);
+                        Color cardColor = _getCardColor(data['course']?? '');
 
                         return Card(
-                          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), 
-                          elevation: 4, 
+                          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          elevation: 4,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                          child: Container( // NEW: Gradient
+                          child: Container(
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(20),
                               gradient: LinearGradient(
@@ -313,27 +365,27 @@ class _HomeScreenState extends State<HomeScreen> {
                               border: Border.all(color: cardColor.withOpacity(0.3))
                             ),
                             child: Padding(
-                              padding: const EdgeInsets.all(14), 
+                              padding: const EdgeInsets.all(14),
                               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                                 Row(children: [
-                                  Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: cardColor.withOpacity(0.2), borderRadius: BorderRadius.circular(12)), child: Icon(Icons.picture_as_pdf, color: cardColor, size: 28)), 
-                                  const SizedBox(width: 12), 
+                                  Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: cardColor.withOpacity(0.2), borderRadius: BorderRadius.circular(12)), child: Icon(Icons.picture_as_pdf, color: cardColor, size: 28)),
+                                  const SizedBox(width: 12),
                                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                    Text(data['title']?? 'No Title', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 16)), 
+                                    Text(data['title']?? 'No Title', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 16)),
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                       decoration: BoxDecoration(color: cardColor, borderRadius: BorderRadius.circular(8)),
                                       child: Text('${data['course']} • ${data['examType']}', style: GoogleFonts.poppins(fontSize: 11, color: Colors.white))
                                     )
-                                  ])), 
+                                  ])),
                                   IconButton(icon: const Icon(Icons.download_for_offline, color: secondaryBlue, size: 30), onPressed: () => _openLink(docId, data['fileUrl']))
                                 ]),
-                                const SizedBox(height: 10), 
-                                Row(children: [Icon(Icons.calendar_today, size: 12, color: Colors.grey), const SizedBox(width: 4), Text(_formatDate(data['uploadedAt']), style: GoogleFonts.poppins(fontSize: 11)), const SizedBox(width: 12), Icon(Icons.data_object, size: 12, color: Colors.grey), const SizedBox(width: 4), Text(_formatBytes(data['fileSize']?? 0), style: GoogleFonts.poppins(fontSize: 11))]),
-                                const SizedBox(height: 10), 
+                                const SizedBox(height: 10),
+                                Row(children: [Icon(Icons.calendar_today, size: 12, color: Colors.grey), const SizedBox(width: 4), Text(_formatDate(data['uploadedAt']), style: GoogleFonts.poppins(fontSize: 11)), const SizedBox(width: 12), Icon(Icons.data_object, size: 12, color: Colors.grey), const SizedBox(width: 4), Text(_formatBytes((data['fileSize']?? 0).toInt()), style: GoogleFonts.poppins(fontSize: 11))]),
+                                const SizedBox(height: 10),
                                 Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                                  Row(children: [IconButton(icon: Icon(Icons.favorite, color: isLiked? Colors.red : Colors.grey, size: 20), onPressed: () => _likeResource(docId)), Text('${data['likes']?? 0}', style: GoogleFonts.poppins(fontSize: 12))]), 
-                                  Row(children: [Icon(Icons.star, color: Colors.amber, size: 20), Text(' ${data['rating']?.toStringAsFixed(1)?? '0.0'}', style: GoogleFonts.poppins(fontSize: 12)), PopupMenuButton<double>(enabled:!isRated, onSelected: (val) => _rateResource(docId, val), itemBuilder: (context) => [1,2,3,4,5].map((e) => PopupMenuItem(value: e.toDouble(), child: Text('$e Star'))).toList(), child: Icon(Icons.rate_review, size: 20, color: isRated? Colors.grey : Colors.black))]), 
+                                  Row(children: [IconButton(icon: Icon(Icons.favorite, color: isLiked? Colors.red : Colors.grey, size: 20), onPressed: () => _likeResource(docId)), Text('${data['likes']?? 0}', style: GoogleFonts.poppins(fontSize: 12))]),
+                                  Row(children: [Icon(Icons.star, color: Colors.amber, size: 20), Text(' ${(data['rating']?? 0.0).toDouble().toStringAsFixed(1)}', style: GoogleFonts.poppins(fontSize: 12)), PopupMenuButton<double>(enabled:!isRated, onSelected: (val) => _rateResource(docId, val), itemBuilder: (context) => [1,2,3,4,5].map((e) => PopupMenuItem(value: e.toDouble(), child: Text('$e Star'))).toList(), child: Icon(Icons.rate_review, size: 20, color: isRated? Colors.grey : Colors.black))]),
                                   Row(children: [Icon(Icons.download, color: Colors.blue, size: 20), Text(' ${data['downloads']?? 0}', style: GoogleFonts.poppins(fontSize: 12))])
                                 ])
                               ])
