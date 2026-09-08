@@ -1,26 +1,33 @@
 workflows:
-  android-release:
-    name: Android Release
+  android-apk:
+    name: Build Android APK
     max_build_duration: 60
+    instance_type: mac_mini_m1
     environment:
-      flutter: 3.47.2  # <--- This is the key
-      vars:
-        GOOGLE_SERVICES_JSON: $GOOGLE_SERVICES_JSON
+      flutter: stable
     scripts:
-      - name: Setup Google Services
+      - name: Find and enter project root
         script: |
-          echo "$GOOGLE_SERVICES_JSON" | tr -d '\n' | base64 --decode > android/app/google-services.json
-          ls -l android/app/google-services.json
-      - name: Flutter pub get
+          cd $CM_BUILD_DIR
+          echo "Current dir: $(pwd)"
+          echo "Files here:"
+          ls -la
+          # Find folder with pubspec.yaml
+          PROJECT_DIR=$(find . -name pubspec.yaml -exec dirname {} \; | head -n 1)
+          echo "Found pubspec in: $PROJECT_DIR"
+          cd $PROJECT_DIR
+          echo "Now in: $(pwd)"
+      - name: Flutter doctor
         script: |
-          flutter --version
-          flutter pub get
-      - name: Clean
+          PROJECT_DIR=$(find . -name pubspec.yaml -exec dirname {} \; | head -n 1)
+          cd $PROJECT_DIR && flutter doctor -v
+      - name: Get Flutter packages
         script: |
-          flutter clean
-          flutter pub get
-      - name: Flutter build APK
+          PROJECT_DIR=$(find . -name pubspec.yaml -exec dirname {} \; | head -n 1)
+          cd $PROJECT_DIR && flutter pub get
+      - name: Build APK
         script: |
-          flutter build apk --release
+          PROJECT_DIR=$(find . -name pubspec.yaml -exec dirname {} \; | head -n 1)
+          cd $PROJECT_DIR && flutter build apk --release
     artifacts:
-      - build/app/outputs/flutter-apk/*.apk
+      - '**/build/app/outputs/flutter-apk/*.apk'

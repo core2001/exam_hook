@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.corevanta.examhook"
+    namespace = "com.example.exam_hook"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -16,11 +16,11 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.corevanta.examhook"
+        applicationId = "com.example.exam_hook"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = 21
-        targetSdk = 34
+        minSdk = flutter.minSdkVersion
+        targetSdk = flutter.targetSdkVersion
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
         // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
         // You can force using the value of versionCode by specifying the `-P force-version-code-ignoring-abi=true`
@@ -33,10 +33,7 @@ android {
         release {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
-            isMinifyEnabled = false  // <- use 'is' instead of just 'minifyEnabled'
-            isShrinkResources = false
             signingConfig = signingConfigs.getByName("debug")
-            
         }
     }
 }
