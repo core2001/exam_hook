@@ -20,6 +20,7 @@ dependencies:
   intl: ^0.20.3
   flutter_animate: ^4.5.2
   url_launcher: ^6.3.2
+  share_plus: ^13.3.0
   uuid: ^4.6.0
   image_picker: ^1.0.7
   shared_preferences: ^2.5.5

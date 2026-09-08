@@ -4,7 +4,9 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:share_plus/share_plus.dart'; // NEW
 import 'admin_dashboard.dart';
+import 'dart:convert'; // NEW
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -22,17 +24,15 @@ class _HomeScreenState extends State<HomeScreen> {
   String searchQuery = '';
   Set<String> likedDocs = {};
   Set<String> ratedDocs = {};
+  Set<String> favoriteDocs = {}; // NEW
   String _themeMode = 'light';
 
   int _tapCount = 0;
   DateTime? _lastTapTime;
 
   final List<Color> _cardColors = [
-    const Color(0xFF00C896),
-    const Color(0xFF3B82F6),
-    const Color(0xFFF59E0B),
-    const Color(0xFFEC4899),
-    const Color(0xFF8B5CF6),
+    const Color(0xFF00C896), const Color(0xFF3B82F6), const Color(0xFFF59E0B),
+    const Color(0xFFEC4899), const Color(0xFF8B5CF6),
   ];
 
   @override
@@ -44,9 +44,24 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadPrefs() async {
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
-      if (mounted) setState(() => _themeMode = prefs.getString('theme_mode')?? 'light');
+      if (mounted) setState(() {
+        _themeMode = prefs.getString('theme_mode')?? 'light';
+        favoriteDocs = Set<String>.from(prefs.getStringList('favorites')?? []); // NEW
+      });
       _checkTerms();
     } catch (e) { debugPrint("Prefs error: $e"); }
+  }
+
+  Future<void> _toggleFavorite(String docId) async { // NEW
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    setState(() {
+      if (favoriteDocs.contains(docId)) {
+        favoriteDocs.remove(docId);
+      } else {
+        favoriteDocs.add(docId);
+      }
+    });
+    await prefs.setStringList('favorites', favoriteDocs.toList());
   }
 
   Future<void> _saveTheme(String theme) async {
@@ -109,6 +124,10 @@ class _HomeScreenState extends State<HomeScreen> {
     if (await canLaunchUrl(Uri.parse(url))) await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
   }
 
+  void _shareResource(String title, String url) { // NEW
+    Share.share('Check out "$title" on ExamHook\n$url');
+  }
+
   void _likeResource(String docId) async {
     if (likedDocs.contains(docId)) return;
     try { await _firestore.collection('resources').doc(docId).update({'likes': FieldValue.increment(1)}); setState(() => likedDocs.add(docId)); } catch(e){ debugPrint(e.toString()); }
@@ -132,7 +151,6 @@ class _HomeScreenState extends State<HomeScreen> {
       _tapCount = 1;
     } else { _tapCount++; }
     _lastTapTime = now;
-
     if (_tapCount >= 5) {
       _tapCount = 0;
       Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminDashboard()));
@@ -162,16 +180,16 @@ class _HomeScreenState extends State<HomeScreen> {
     const Color secondaryBlue = Color(0xFF3B82F6);
     bool isDark = _themeMode == 'dark';
 
-    return StreamBuilder<DocumentSnapshot>( // KEY CHANGE: LISTEN LIVE
+    return StreamBuilder<DocumentSnapshot>(
       stream: _firestore.collection('settings').doc('app').snapshots(),
       builder: (context, settingsSnap) {
-        List<String> liveSubjects = ['All', 'Maths', 'Physics', 'Chemistry', 'Biology']; // fallback
+        List<String> liveSubjects = ['All', 'Maths', 'Physics', 'Chemistry', 'Biology', 'Favorites']; // ADDED FAVORITES
 
         if (settingsSnap.hasData && settingsSnap.data!.exists) {
           var data = settingsSnap.data!.data() as Map<String, dynamic>?;
           if (data!= null && data['subjects']!= null) {
             List<String> dbSubjects = List<String>.from(data['subjects']);
-            liveSubjects = ['All',...dbSubjects];
+            liveSubjects = ['All',...dbSubjects, 'Favorites']; // Favorites always last
           }
         }
 
@@ -231,7 +249,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       itemBuilder: (context, index) {
                         String subject = liveSubjects[index];
                         return ListTile(
-                          leading: Icon(Icons.book, color: primaryGreen),
+                          leading: Icon(subject == 'Favorites'? Icons.bookmark : Icons.book, color: primaryGreen), // NEW ICON
                           title: Text(subject, style: GoogleFonts.poppins()),
                           selected: selectedCourse == subject,
                           selectedTileColor: primaryGreen.withOpacity(0.1),
@@ -306,15 +324,29 @@ class _HomeScreenState extends State<HomeScreen> {
                       }
 
                       var docs = snapshot.data!.docs;
-                      if (selectedCourse!= 'All') docs = docs.where((d) => (d.data() as Map)['course'] == selectedCourse).toList();
+                      if (selectedCourse == 'Favorites') { // NEW FILTER
+                        docs = docs.where((d) => favoriteDocs.contains(d.id)).toList();
+                      } else if (selectedCourse!= 'All') {
+                        docs = docs.where((d) => (d.data() as Map)['course'] == selectedCourse).toList();
+                      }
                       if (searchQuery.isNotEmpty) docs = docs.where((d) {
                         var data = d.data() as Map;
                         return data['title'].toString().toLowerCase().contains(searchQuery) || data['course'].toString().toLowerCase().contains(searchQuery);
                       }).toList();
 
+                      if (selectedCourse == 'Favorites' && docs.isEmpty) { // NEW EMPTY STATE
+                        return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                          Icon(Icons.bookmark_border, size: 80, color: Colors.grey),
+                          SizedBox(height: 16),
+                          Text('No favorites yet', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600)),
+                          Text('Tap the bookmark icon to save resources', style: GoogleFonts.poppins(color: Colors.grey))
+                        ]));
+                      }
+
                       return ListView.builder(itemCount: docs.length, itemBuilder: (context, index) {
                         var doc = docs[index]; var data = doc.data() as Map<String, dynamic>; String docId = doc.id;
                         bool isLiked = likedDocs.contains(docId); bool isRated = ratedDocs.contains(docId);
+                        bool isFav = favoriteDocs.contains(docId); // NEW
                         Color cardColor = _getCardColor(data['course']?? '');
 
                         return Card(
@@ -341,6 +373,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                       child: Text('${data['course']} • ${data['examType']}', style: GoogleFonts.poppins(fontSize: 11, color: Colors.white))
                                     )
                                   ])),
+                                  IconButton(icon: Icon(isFav? Icons.bookmark : Icons.bookmark_border, color: primaryGreen), onPressed: () => _toggleFavorite(docId)), // NEW
+                                  IconButton(icon: const Icon(Icons.share, color: Colors.grey, size: 24), onPressed: () => _shareResource(data['title'], data['fileUrl'])), // NEW
                                   IconButton(icon: const Icon(Icons.download_for_offline, color: secondaryBlue, size: 30), onPressed: () => _openLink(docId, data['fileUrl']))
                                 ]),
                                 const SizedBox(height: 10),
